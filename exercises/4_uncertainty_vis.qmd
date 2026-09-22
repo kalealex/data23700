@@ -1,0 +1,300 @@
+---
+title: "Exercise 4: Visualizing model outputs"
+format:
+  pdf:
+    toc: false
+---
+
+*See course schedule for the due date.* Fill in this file by following the **PROMPTS** below, render to PDF, and upload the PDF to Gradescope.
+
+## Setup
+
+### Software
+
+This exercise uses R via Quarto. Quarto is a modern successor to RMarkdown that works in RStudio, VS Code, Positron, or JupyterLab. If you don't already have it, download and install Quarto from [quarto.org/docs/get-started/](https://quarto.org/docs/get-started/). You will also need R (and an IDE of your choice) installed.
+
+Install the R packages this exercise uses (skip if you already have them):
+
+```{r}
+#| eval: false
+install.packages(c("readr", "dplyr", "tidyr", "ggplot2",
+                   "brms", "tidybayes", "ggdist",
+                   "modelr", "patchwork"))
+```
+
+To render this file to PDF, you also need a LaTeX distribution. The easiest option is TinyTeX, which Quarto installs for you. From the terminal:
+
+```{bash}
+#| eval: false
+quarto install tinytex
+```
+
+### Data and model
+
+We provide a fitted `brms` model to save you time. Download `insurance_models.rds` from the course repository and place it at `../data/models/insurance_models.rds` relative to this file.
+
+Load libraries and the model:
+
+```{r}
+#| message: false
+#| warning: false
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggdist)
+library(patchwork)
+library(brms)
+library(tidybayes)
+library(modelr)
+
+fit <- readRDS("../data/models/insurance_models.rds")
+model_df <- fit$model_df
+m_main   <- fit$m_main
+```
+
+The model is a Bayesian lognormal regression fit to the `insurance.csv` dataset:
+
+`charges ~ c_bmi * smoker + c_age + region`
+
+where `c_bmi` and `c_age` are mean-centered BMI and age. The response is charges in USD.
+
+## Part 1: What is my model showing me?
+
+The *same fitted model* can produce several different quantities, depending on what you ask of it:
+
+- **Overall expectation**, $E[Y]$: the average of the outcome across the whole sample.
+- **Conditional expectation**, $E[Y \mid X = x]$: the average outcome given specific predictor values. This is what a regression "line" traces.
+- **Prediction**, $Y_i$: what an individual observation might look like. Wider than the conditional expectation because it includes residual variability that the model has learned about individual differences.
+
+A regression coefficient is *none of these* directly. It's a parameter of the model that helps generate them. Choosing the right quantity for a given question, and communicating that quantity visually, is the point of this exercise.
+
+Two worked examples follow. You can copy their patterns when you build your own visualizations in Part 3.
+
+### Worked example: a prediction
+
+The posterior predictive distribution answers *"what might a specific new observation look like?"* It includes both parameter uncertainty *and* the residual variability the model has learned. Here is the predicted charge for a 40-year-old non-smoker with BMI 25 living in the southwest:
+
+```{r}
+profile <- tibble(
+  c_age  = 40 - mean(model_df$age),
+  c_bmi  = 25 - mean(model_df$bmi),
+  smoker = "no",
+  region = "southwest"
+)
+
+example_prediction <- profile |>
+  add_predicted_draws(m_main, ndraws = 500)
+
+ggplot(example_prediction, aes(x = .prediction)) +
+  stat_slab(fill = "steelblue") +
+  labs(x = "Predicted charges (USD)", y = NULL,
+       title = "Predicted charge: 40 y/o non-smoker, BMI 25, southwest") +
+  theme_minimal()
+```
+
+### Worked example: a conditional expectation
+
+The posterior over the expected value at the same profile answers *"what does the model estimate as the mean charge for people like this?"* It's a distribution over the model's *conditional expectation* and contains only parameter uncertainty:
+
+```{r}
+example_epred <- profile |>
+  add_epred_draws(m_main, ndraws = 500)
+
+ggplot(example_epred, aes(x = .epred)) +
+  stat_halfeye(fill = "steelblue") +
+  labs(x = "Expected charge (USD)", y = NULL,
+       title = "Expected charge: 40 y/o non-smoker, BMI 25, southwest") +
+  theme_minimal()
+```
+
+Same model, same profile, but very different distributions. The prediction is much wider because it accounts for how different individuals with the same profile can be. Both are valid outputs of the model, but they answer different questions.
+
+## Part 2: The query library
+
+Below are eight pre-computed queries, each derived from `m_main`. Read the code so you understand *what each one is*, and answer the prompts under each query. In Part 3, you will pick the right query to answer each analytical question. Reading the code carefully now will pay off: several of these queries look similar but answer very different questions.
+
+### `q_smoker_coef`: raw posterior for the `smokeryes` coefficient
+
+The `smokeryes` coefficient represents the log-scale main effect of smoking (holding other predictors at their reference levels, e.g., for BMI `c_bmi = 0`).
+
+```{r}
+q_smoker_coef <- m_main |>
+  spread_draws(b_smokeryes)
+
+head(q_smoker_coef)
+```
+
+*PROMPT: What kind of question could this query help answer? What kind of question could it not answer?*
+
+### `q_smoker_marginal`: expected charge by smoker status, marginalized over other predictors
+
+This is the posterior of $E[\text{charges} \mid \text{smoker}]$, on the response scale (USD), averaged over the sample distribution of the other predictors.
+
+```{r}
+predictor_grid <- model_df |>
+  data_grid(c_bmi, smoker, c_age, region)
+
+q_smoker_marginal <- predictor_grid |>
+  add_epred_draws(m_main, ndraws = 500) |>
+  group_by(smoker, .draw) |>
+  summarise(.epred = mean(.epred), .groups = "drop")
+
+head(q_smoker_marginal)
+```
+
+*PROMPT: What kind of question could this query help answer? What kind of question could it not answer?*
+
+### `q_smoker_contrast`: marginal difference in expected charges, smoker vs. non-smoker
+
+The posterior of the difference $E[\text{charges} \mid \text{smoker = yes}] - E[\text{charges} \mid \text{smoker = no}]$, marginalized over the other predictors.
+
+```{r}
+q_smoker_contrast <- q_smoker_marginal |>
+  pivot_wider(names_from = smoker, values_from = .epred) |>
+  mutate(.contrast = yes - no) |>
+  select(.draw, .contrast)
+
+head(q_smoker_contrast)
+```
+
+*PROMPT: What kind of question could this query help answer? What kind of question could it not answer?*
+
+### `q_smoker_bmi_grid`: expected charge by smoker status *and* BMI
+
+The posterior of $E[\text{charges} \mid \text{smoker}, \text{BMI}]$ at a grid of BMI values, marginalized over age and region.
+
+```{r}
+bmi_grid_values <- c(-10, -5, 0, 5, 10, 15)  # centered BMI values
+
+smoker_bmi_grid <- model_df |>
+  data_grid(c_bmi = bmi_grid_values, smoker, c_age, region)
+
+q_smoker_bmi_grid <- smoker_bmi_grid |>
+  add_epred_draws(m_main, ndraws = 500) |>
+  group_by(c_bmi, smoker, .draw) |>
+  summarise(.epred = mean(.epred), .groups = "drop") |>
+  mutate(bmi = c_bmi + mean(model_df$bmi))
+
+head(q_smoker_bmi_grid)
+```
+
+*PROMPT: What kind of question could this query help answer? What kind of question could it not answer?*
+
+### `q_interaction_coef`: raw posterior for the `c_bmi:smokeryes` coefficient
+
+The interaction coefficient represents the log-scale change in the smoker main effect per unit increase in centered BMI.
+
+```{r}
+q_interaction_coef <- m_main |>
+  spread_draws(`b_c_bmi:smokeryes`)
+
+head(q_interaction_coef)
+```
+
+*PROMPT: What kind of question could this query help answer? What kind of question could it not answer?*
+
+### `q_epred_by_age`: expected charge as a function of age
+
+The posterior of $E[\text{charges} \mid \text{age}]$ at a grid of ages, marginalized over the other predictors.
+
+```{r}
+age_grid_values <- seq(-25, 25, by = 5)  # centered age values
+
+age_grid <- model_df |>
+  data_grid(c_bmi, smoker, c_age = age_grid_values, region)
+
+q_epred_by_age <- age_grid |>
+  add_epred_draws(m_main, ndraws = 500) |>
+  group_by(c_age, .draw) |>
+  summarise(.epred = mean(.epred), .groups = "drop") |>
+  mutate(age = c_age + mean(model_df$age))
+
+head(q_epred_by_age)
+```
+
+*PROMPT: What kind of question could this query help answer? What kind of question could it not answer?*
+
+### `q_predicted_conditional`: posterior predictive for a specific profile
+
+The full predictive distribution for a specified new person. This is the same shape as the prediction in Part 1's worked example, at a different profile.
+
+```{r}
+target_profile <- tibble(
+  c_age  = 35 - mean(model_df$age),
+  c_bmi  = 32 - mean(model_df$bmi),
+  smoker = "yes",
+  region = "northeast"
+)
+
+q_predicted_conditional <- target_profile |>
+  add_predicted_draws(m_main, ndraws = 500)
+
+head(q_predicted_conditional)
+```
+
+*PROMPT: What kind of question could this query help answer? What kind of question could it not answer?*
+
+### `q_epred_conditional`: posterior expectation for the same profile
+
+The posterior of $E[\text{charges} \mid X = x]$ at the same profile as `q_predicted_conditional`. Same model, same profile, different quantity.
+
+```{r}
+q_epred_conditional <- target_profile |>
+  add_epred_draws(m_main, ndraws = 500)
+
+head(q_epred_conditional)
+```
+
+*PROMPT: What kind of question could this query help answer? What kind of question could it not answer?*
+
+## Part 3: Design a visualization to answer each statistical question
+
+For each of the three questions below:
+
+1. **Choose** the query from Part 2 that best answers the question. Justify your choice by explaining what quantity the question is really asking about.
+2. **Design** a visualization using `ggplot2` and `ggdist` that communicates the answer. You may adapt the patterns from Part 1's worked examples.
+3. **Explain** what claim your visualization is making. What would have to be true about the data or the world for the claim to hold?
+
+### Question 1
+
+*What are the likely healthcare charges for a specific new client — a 35-year-old smoker with BMI 32 in the northeast?*
+
+*PROMPT: Which query would you use to answer this question? Explain what quantity this question is asking about, and why the query you picked matches.*
+
+```{r}
+# PROMPT: Design your visualization here.
+
+```
+
+*PROMPT: What claim is your visualization making? What would have to be true for the claim to hold?*
+
+### Question 2
+
+*In this sample, how much more on average do smokers pay for healthcare than non-smokers?*
+
+*PROMPT: Which query would you use? Justify your choice, and briefly explain why the queries you didn't pick would answer a different question.*
+
+```{r}
+# PROMPT: Design your visualization here.
+
+```
+
+*PROMPT: What claim is your visualization making? Now suppose someone reads it and says, "This shows that smoking causes higher healthcare charges." Would that claim be warranted from what you've visualized? Which features of the data or the analysis would you need to know more about before endorsing the causal reading?*
+
+### Question 3
+
+*Does the impact of smoking on healthcare charges depend on BMI?*
+
+*PROMPT: Which query would you use? Justify your choice by explaining what the question is really asking about.*
+
+```{r}
+# PROMPT: Design your visualization here.
+
+```
+
+*PROMPT: State your answer to the question in plain English, for a general reader. (Notice how your choice of query can make this easy or hard.)*
+
+## Submission
+
+Render this file to PDF (Quarto: **Render** in RStudio, or `quarto render 4_uncertainty_vis.qmd` in the terminal) and upload the resulting `4_uncertainty_vis.pdf` to Gradescope.

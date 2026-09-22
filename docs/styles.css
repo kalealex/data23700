@@ -1,0 +1,44 @@
+/* DATA 23700 course site. Hand-maintained alongside build.py. */
+
+/* Keep prose at a readable measure; the syllabus is long and text-heavy. */
+main {
+  max-width: 54rem;
+}
+
+body {
+  font-size: 1.02rem;
+  line-height: 1.6;
+}
+
+/* Section headings need more air than the Bootstrap default, since the
+   schedule and evaluation pages stack many of them. */
+main h2 {
+  margin-top: 2.4rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #e3e3e3;
+}
+
+main h3 {
+  margin-top: 1.8rem;
+}
+
+/* The grading and office-hours tables carry real information. */
+table {
+  margin: 1.2rem 0;
+}
+
+table th {
+  border-bottom: 2px solid #d0d0d0;
+}
+
+table td,
+table th {
+  padding: 0.4rem 0.7rem;
+}
+
+/* Deadline lines in the schedule are written as bold paragraphs in the
+   README; give them a little standing without changing how they're written. */
+main p > strong:only-child {
+  display: inline-block;
+  padding-top: 0.2rem;
+}
