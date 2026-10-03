@@ -10,6 +10,7 @@ This repository holds the files you need in order to do the work:
 - `assignments/`
 - `exercises/`
 - `project/`
+- `figures/`
 - `data/`
 - `resources/`
 
