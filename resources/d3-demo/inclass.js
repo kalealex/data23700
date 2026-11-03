@@ -17,21 +17,21 @@ let barSvg = d3.select("#bar-container").append("svg")
         .attr("height", svgHeight);
 let barGroup = barSvg.append("g")
         .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
-let barGroupOverlay = barSvg.append("g")
-        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+let barOverlayGroup = barSvg.append("g")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");        
+    
 
 let brush = d3.brush()
-    .on("start brush end", brushFxn);
+        .on("start brush end", brushFxn);
 
-let scatterData,
-    filteredBarData,
+let scatterData = [],
+    filteredBarData = [],
     points,
     xScaleScatter,
     yScaleScatter,
     xScaleBar,
     yScaleBar,
-    brushRange,
-    selectedCyl = [];
+    brushRange;
 
 d3.csv("cars.csv")
     .then(function (data) {
@@ -86,7 +86,6 @@ d3.csv("cars.csv")
             .attr("r", 5)
             .attr("class", "non-brushed");
 
-        // add brush
         scatterGroup.append("g")
             .call(brush);
 
@@ -131,8 +130,7 @@ d3.csv("cars.csv")
             .attr("x", (d) => xScaleBar(d.cyl))
             .attr("y", (d) => yScaleBar(d.count))
             .attr("width", xScaleBar.bandwidth())
-            .attr("height", (d) => height - yScaleBar(d.count))
-            .on("click", clickFxn);
+            .attr("height", (d) => height - yScaleBar(d.count));
 
     })
     .catch(function (err) {
@@ -177,8 +175,7 @@ function getBarData(filteredData) {
     return returnData;
 }
 
-function brushFxn(event) {
-    // revert the appearance of points
+function brushFxn (event) {
     points.attr("class", "non-brushed");
 
     brushRange = undefined;
@@ -192,37 +189,13 @@ function brushFxn(event) {
         }
     }
 
-    // render changes in real-time
     update();
 }
 
-function clickFxn(event) {
-    console.log(event);
-    let clickedCyl = +event.target.__data__.cyl;
-
-    if (!selectedCyl.some((e) => e == clickedCyl)) {
-        selectedCyl.push(clickedCyl);
-        selectedCyl.sort();
-    } else {
-        let idx = selectedCyl.indexOf(clickedCyl);
-        selectedCyl.splice(idx, 1);
-    }
-
-    // render changes in real-time
-    update();
-}
-
-function selectionFilter(d) {
+function selectionFilter (d) {
     // checks whether each point meets the current selection criteria
     // get only points inside of brush AND in selected set of cyl values
-    if (brushRange && selectedCyl.length > 0) {
-        return (brushRange.x0 <= d.hp && brushRange.x1 >= d.hp && 
-            brushRange.y0 <= d.mpg && brushRange.y1 >= d.mpg &&
-            selectedCyl.some((e) => e == d.cyl));
-    } else if (!brushRange) {
-        // use brush only if it's active
-        return(selectedCyl.some((e) => e == d.cyl));
-    } else if (selectedCyl.length == 0) {
+    if (brushRange) {
         return(brushRange.x0 <= d.hp && brushRange.x1 >= d.hp && 
             brushRange.y0 <= d.mpg && brushRange.y1 >= d.mpg);
     } else {
@@ -231,23 +204,19 @@ function selectionFilter(d) {
 }
 
 function update() {
-    // scatter
     points.attr("class", "non-brushed");
     points.filter(selectionFilter)
         .attr("class", "brushed");
 
-    // bar
     let filteredScatterData = scatterData.filter(selectionFilter);
     filteredBarData = getBarData(filteredScatterData);
 
-    // foreground bars
-    barGroupOverlay.selectAll("rect")
+    barOverlayGroup.selectAll("rect")
         .data(filteredBarData)
         .join("rect")
         .attr("class", "brushed")
         .attr("x", (d) => xScaleBar(d.cyl))
         .attr("y", (d) => yScaleBar(d.count))
         .attr("width", xScaleBar.bandwidth())
-        .attr("height", (d) => height - yScaleBar(d.count))
-        .on("click", clickFxn);
+        .attr("height", (d) => height - yScaleBar(d.count));
 }
